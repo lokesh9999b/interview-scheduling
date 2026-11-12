@@ -1,0 +1,249 @@
+// GRIT Interview Scheduling — data model
+// Provider-agnostic on purpose: SQLite for the local demo, Postgres on Vercel.
+// No enums, no native types, no JSON columns -> a one-line provider swap works.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id
+  name      String
+  email     String   @unique
+  role      String // STUDENT | INTERVIEWER | ADMIN
+  campus    String?
+  cohort    String?
+  hue       Int      @default(150)
+  createdAt DateTime @default(now())
+
+  studentProfile     StudentProfile?
+  interviewerProfile InterviewerProfile?
+  interviewsAsInterviewer Interview[]   @relation("InterviewerInterviews")
+  notifications      Notification[]
+  events             InterviewEvent[]
+  flagsRaised        MalpracticeFlag[]  @relation("FlagRaisedBy")
+  nudgesSent         OpsNudge[]         @relation("NudgeSentBy")
+}
+
+model StudentProfile {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attendancePct      Int       @default(92)
+  registrationStatus String    @default("CLEARED") // CLEARED | PENDING
+  conductStatus      String    @default("CLEAR") // CLEAR | FLAGGED
+  miles              Int       @default(0)
+  qualiflyerAt       DateTime?
+  progress           BadgeProgress[]
+  interviews         Interview[]
+  nudges             OpsNudge[]
+  flags              MalpracticeFlag[]
+}
+
+model InterviewerProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  timezone       String   @default("Asia/Kolkata")
+  meetingBaseUrl String   @default("https://meet.google.com/grit-interview")
+  slotMinutes    Int      @default(30)
+  bufferMinutes  Int      @default(5)
+  maxPerDay      Int      @default(6)
+  rules          AvailabilityRule[]
+  exceptions     AvailabilityException[]
+  slots          InterviewSlot[]
+}
+
+model Track {
+  id          String  @id
+  name        String
+  slug        String  @unique
+  description String
+  badges      Badge[]
+}
+
+model Badge {
+  id                 String @id
+  trackId            String
+  track              Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  level              String // NOVICE | SPECIALIST | EXPERT | MASTER | GRAND_MASTER
+  name               String
+  requiredSkills     String // JSON array of skill labels
+  milesAward         Int    @default(250)
+  cooldownFailDays   Int    @default(14)
+  cooldownRetakeDays Int    @default(7)
+  maxAttempts        Int    @default(3)
+  progress           BadgeProgress[]
+  interviews         Interview[]
+
+  @@unique([trackId, level])
+}
+
+model BadgeProgress {
+  id             String    @id @default(cuid())
+  studentId      String
+  student        StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  badgeId        String
+  badge          Badge     @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  skillsCleared  Int       @default(0)
+  skillsTotal    Int       @default(4)
+  status         String    @default("IN_PROGRESS")
+  attemptsUsed   Int       @default(0)
+  cooldownUntil  DateTime?
+  eligibleAt     DateTime?
+  awardedAt      DateTime?
+  revokedAt      DateTime?
+  credentialId   String?
+
+  @@unique([studentId, badgeId])
+}
+
+model AvailabilityRule {
+  id            String   @id @default(cuid())
+  interviewerId String
+  interviewer   InterviewerProfile @relation(fields: [interviewerId], references: [id], onDelete: Cascade)
+  weekday       Int // 0 = Sunday .. 6 = Saturday (IST)
+  startMin      Int // minutes from midnight IST
+  endMin        Int
+  active        Boolean  @default(true)
+}
+
+model AvailabilityException {
+  id            String   @id @default(cuid())
+  interviewerId String
+  interviewer   InterviewerProfile @relation(fields: [interviewerId], references: [id], onDelete: Cascade)
+  date          String // YYYY-MM-DD (IST)
+  type          String // UNAVAILABLE | EXTRA
+  startMin      Int?
+  endMin        Int?
+  note          String?
+}
+
+model InterviewSlot {
+  id            String   @id @default(cuid())
+  interviewerId String
+  interviewer   InterviewerProfile @relation(fields: [interviewerId], references: [id], onDelete: Cascade)
+  startsAt      DateTime
+  endsAt        DateTime
+  status        String   @default("OPEN") // OPEN | BOOKED | BLOCKED
+  sourceRuleId  String?
+  version       Int      @default(0)
+  interviews    Interview[]
+  lock          SlotLock?
+
+  @@index([interviewerId, startsAt])
+  @@index([status, startsAt])
+}
+
+// Only live bookings live here. Unique slotId is the DB-level guard against
+// double booking; cancelled bookings release their lock so the slot can reopen.
+model SlotLock {
+  slotId      String   @id
+  slot        InterviewSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  interviewId String   @unique
+  createdAt   DateTime @default(now())
+}
+
+model Interview {
+  id                String   @id @default(cuid())
+  studentId         String
+  student           StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  badgeId           String
+  badge             Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  slotId            String
+  slot              InterviewSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  interviewerId     String
+  interviewer       User     @relation("InterviewerInterviews", fields: [interviewerId], references: [id])
+  attemptNo         Int
+  status            String // BOOKED | AWAITING_OUTCOME | PASSED | FAILED | RETAKE_REQUIRED | NO_SHOW | CANCELLED_STUDENT | CANCELLED_INTERVIEWER | EXPIRED
+  startsAt          DateTime
+  endsAt            DateTime
+  meetingUrl        String
+  bookedAt          DateTime @default(now())
+  cancelledAt       DateTime?
+  cancelledBy       String?
+  cancelReason      String?
+  rescheduledFromId String?
+  outcome           String? // PASS | FAIL | RETAKE
+  outcomeNote       String?
+  outcomeAt         DateTime?
+  outcomeBy         String?
+  noShowAt          DateTime?
+  events            InterviewEvent[]
+  notifications     Notification[]
+  flags             MalpracticeFlag[]
+
+  @@unique([studentId, badgeId, attemptNo])
+  @@index([interviewerId, startsAt])
+  @@index([studentId, status])
+}
+
+model InterviewEvent {
+  id          String   @id @default(cuid())
+  interviewId String?
+  interview   Interview? @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  fromState   String
+  toState     String
+  actorId     String?
+  actor       User?    @relation(fields: [actorId], references: [id])
+  actorRole   String
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([interviewId, createdAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interviewId String?
+  interview   Interview? @relation(fields: [interviewId], references: [id], onDelete: SetNull)
+  templateKey String // BOOKING_CONFIRMED | REMINDER_24H | RESULT_PASS | RESULT_FAIL | RESULT_RETAKE | NUDGE | FLAG_REVOKED
+  channel     String   @default("IN_APP")
+  title       String
+  body        String
+  ctaLabel    String?
+  ctaHref     String?
+  sentAt      DateTime @default(now())
+  readAt      DateTime?
+
+  @@index([userId, sentAt])
+}
+
+model MalpracticeFlag {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  badgeId     String?
+  interviewId String?
+  interview   Interview? @relation(fields: [interviewId], references: [id], onDelete: SetNull)
+  raisedBy    String?
+  raisedByUser User?   @relation("FlagRaisedBy", fields: [raisedBy], references: [id])
+  reason      String
+  evidenceUrl String?
+  status      String   @default("OPEN") // OPEN | CONFIRMED | DISMISSED
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  @@index([studentId, status])
+}
+
+model OpsNudge {
+  id        String   @id @default(cuid())
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sentBy    String?
+  sentByUser User?   @relation("NudgeSentBy", fields: [sentBy], references: [id])
+  channel   String   @default("IN_APP")
+  note      String?
+  sentAt    DateTime @default(now())
+
+  @@index([studentId, sentAt])
+}
