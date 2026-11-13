@@ -15,6 +15,7 @@ This is a fictional-data demo, not a production scheduling or identity system.
 Requirements: Node.js and npm.
 
 ```powershell
+node scripts/use-sqlite.mjs
 npm install
 Copy-Item .env.example .env
 npm run db:push
@@ -213,18 +214,34 @@ The `/student/before-after` page renders the student status component for repres
 
 ## Tech and database
 
-Next.js App Router, React, TypeScript, Tailwind CSS, Prisma, and SQLite for the local demo. The Prisma schema is intended to support a PostgreSQL deployment by changing the datasource provider.
+Next.js App Router, React, TypeScript, Tailwind CSS, and Prisma. The checked-in Prisma schema uses PostgreSQL for deployment, and Prisma Client uses Neon's serverless driver adapter for app queries. Local development can switch it to SQLite with `node scripts/use-sqlite.mjs`; switch it back with `node scripts/use-postgres.mjs`.
 
-To switch the schema provider:
+## Free prototype deployment (Vercel + Neon)
 
-```powershell
-npm run db:postgres
-# Set DATABASE_URL to a PostgreSQL connection string, then:
-npm run db:push
-npm run db:seed
-```
+The app can be deployed to Vercel with a hosted PostgreSQL database such as Neon. Free-tier plans and limits can change. This is a public demo, not a production service: persona switching is not real authentication, so do not put real personal data in it.
 
-Switch back to SQLite with `npm run db:sqlite` and set `DATABASE_URL="file:./dev.db"` in `.env`. Database credentials and production deployment configuration are not included.
+1. Create a Neon project and database. Copy its PostgreSQL connection string; use the **direct** connection string for the one-time schema setup and seed.
+2. From the project folder, make sure the Prisma schema is set to PostgreSQL:
+
+   ```powershell
+   node scripts/use-postgres.mjs
+   ```
+
+3. Keep both Neon URLs in your local `.env`: `DATABASE_URL` should be the pooled URL for app traffic, and `DATABASE_URL_UNPOOLED` should be the direct URL for schema operations. Then initialize the database:
+
+   ```powershell
+   npm run db:push
+   npm run db:seed
+   ```
+
+   **Warning:** `db:seed` clears existing rows before inserting fictional demo data. Run it only on a new/empty demo database, and never as part of the Vercel build.
+
+4. Push the PostgreSQL schema change and project files to the GitHub repository connected to Vercel. Do not commit `.env` or paste database credentials into source files.
+5. In Vercel, import the repository, keep the project root at the repository root, and use the default Next.js settings (`npm run build` is already configured).
+6. In the Vercel project’s **Settings → Environment Variables**, add both `DATABASE_URL` (Neon pooled URL) and `DATABASE_URL_UNPOOLED` (direct URL) for **Production** (and Preview if you want preview deployments). The app’s Prisma Neon adapter uses the pooled URL; Prisma uses the direct URL for schema operations. Do not expose either as a `NEXT_PUBLIC_` variable.
+7. Deploy, then open the Vercel URL and exercise the demo personas. If you change environment variables, redeploy for them to take effect.
+
+For local SQLite development, switch the schema with `node scripts/use-sqlite.mjs` and set `.env` to `DATABASE_URL="file:./dev.db"`. Before deploying, switch it back with `node scripts/use-postgres.mjs` and include that schema change in your GitHub push.
 
 ## Assignment write-up and recording
 

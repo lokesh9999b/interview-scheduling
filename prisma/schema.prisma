@@ -1,5 +1,6 @@
 // GRIT Interview Scheduling — data model
-// Provider-agnostic on purpose: SQLite for the local demo, Postgres on Vercel.
+// PostgreSQL is used for deployment; scripts/use-sqlite.mjs switches this
+// datasource to SQLite for local development.
 // No enums, no native types, no JSON columns -> a one-line provider swap works.
 
 generator client {
@@ -7,8 +8,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model User {
